@@ -4,7 +4,7 @@ import requests
 import time
 from dotenv import load_dotenv
 
-from discord import send_discord_embed  # discord.pyに書いた関数を呼ぶ想定
+from discord import send_discord_embed  # discord.pyの関数を想定
 
 load_dotenv()
 
@@ -15,6 +15,7 @@ DB_NAME = os.getenv("DB_NAME")
 
 BEARER_TOKEN = os.getenv("TWITTER_BEARER_TOKEN")
 TARGET_USERNAME = "kotehanx01"
+TARGET_USER_ID = "3282272796"  # kotehanx01さんのユーザーIDを固定でセットしてください
 START_TIME = "2025-08-01T00:00:00Z"
 
 HEADERS = {"Authorization": f"Bearer {BEARER_TOKEN}"}
@@ -40,17 +41,8 @@ def mark_fetched(conn, tweet_id):
     conn.commit()
 
 def get_user_id(username):
-    url = f"https://api.twitter.com/2/users/by/username/{username}"
-    while True:
-        resp = requests.get(url, headers=HEADERS)
-        if resp.status_code == 429:
-            reset_time = int(resp.headers.get("x-rate-limit-reset", 0))
-            sleep_seconds = max(reset_time - int(time.time()), 0) + 1
-            print(f"Rate limit exceeded on get_user_id. Sleeping for {sleep_seconds} seconds...")
-            time.sleep(sleep_seconds)
-            continue
-        resp.raise_for_status()
-        return resp.json()["data"]["id"]
+    # 固定IDを返すだけにしてあります
+    return TARGET_USER_ID
 
 def get_tweets_since(user_id, start_time, conn):
     url = f"https://api.twitter.com/2/users/{user_id}/tweets"
@@ -70,7 +62,7 @@ def get_tweets_since(user_id, start_time, conn):
         if resp.status_code == 429:
             reset_time = int(resp.headers.get("x-rate-limit-reset", 0))
             sleep_seconds = max(reset_time - int(time.time()), 0) + 1
-            print(f"Rate limit exceeded on get_tweets_since. Sleeping for {sleep_seconds} seconds...")
+            print(f"Rate limit exceeded. Sleeping for {sleep_seconds} seconds...")
             time.sleep(sleep_seconds)
             continue
         resp.raise_for_status()
@@ -80,7 +72,7 @@ def get_tweets_since(user_id, start_time, conn):
                 tweet["author_username"] = TARGET_USERNAME
                 tweets.append(tweet)
                 mark_fetched(conn, tweet["id"])
-                send_discord_embed(tweet, TARGET_USERNAME)  # Discord通知
+                send_discord_embed(tweet, TARGET_USERNAME)
         next_token = data.get("meta", {}).get("next_token")
         if not next_token:
             break
@@ -105,7 +97,7 @@ def get_replies_to_user(username, start_time, conn):
         if resp.status_code == 429:
             reset_time = int(resp.headers.get("x-rate-limit-reset", 0))
             sleep_seconds = max(reset_time - int(time.time()), 0) + 1
-            print(f"Rate limit exceeded on get_replies_to_user. Sleeping for {sleep_seconds} seconds...")
+            print(f"Rate limit exceeded. Sleeping for {sleep_seconds} seconds...")
             time.sleep(sleep_seconds)
             continue
         resp.raise_for_status()
@@ -115,7 +107,7 @@ def get_replies_to_user(username, start_time, conn):
                 tweet["author_username"] = "reply_user"
                 replies.append(tweet)
                 mark_fetched(conn, tweet["id"])
-                send_discord_embed(tweet, username)  # Discord通知
+                send_discord_embed(tweet, username)
         next_token = data.get("meta", {}).get("next_token")
         if not next_token:
             break
