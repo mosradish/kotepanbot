@@ -10,7 +10,7 @@ load_dotenv()
 
 DB_HOST = os.getenv("DB_HOST")
 DB_USER = os.getenv("DB_USER")
-DB_PASS = os.getenv("DB_PASS")
+DB_PASSWORD = os.getenv("DB_PASSWORD")
 DB_NAME = os.getenv("DB_NAME")
 
 BEARER_TOKEN = os.getenv("TWITTER_BEARER_TOKEN")
@@ -23,7 +23,7 @@ def get_db_connection():
     return pymysql.connect(
         host=DB_HOST,
         user=DB_USER,
-        password=DB_PASS,
+        password=DB_PASSWORD,
         database=DB_NAME,
         charset="utf8mb4",
         cursorclass=pymysql.cursors.DictCursor
