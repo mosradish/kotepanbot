@@ -5,8 +5,6 @@ def send_discord_embed(tweet, target_username):
         tweet_text = tweet_text[:397] + "..."
 
     embed = {
-        "username": "Twitter通知Bot",
-        "avatar_url": "https://abs.twimg.com/icons/apple-touch-icon-192x192.png",
         "embeds": [
             {
                 "title": f"📢 @{author} さんの新しいツイート",
