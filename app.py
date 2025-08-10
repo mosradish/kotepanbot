@@ -52,9 +52,10 @@ def get_tweets_since(user_id, start_time, conn):
     params = {
         "max_results": 100,
         "start_time": start_time,
-        "exclude": "",
+        "exclude": "retweets",  # リツイートを除外
         "tweet.fields": "created_at,text"
     }
+
     tweets = []
     next_token = None
 
