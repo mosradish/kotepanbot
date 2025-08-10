@@ -1,10 +1,10 @@
-# app.py
 import os
 import pymysql
 import requests
+import time
 from dotenv import load_dotenv
 
-from discord import send_discord_embed  # 追加
+from discord import send_discord_embed  # discord.pyに書いた関数を呼ぶ想定
 
 load_dotenv()
 
@@ -40,22 +40,26 @@ def mark_fetched(conn, tweet_id):
     conn.commit()
 
 def get_user_id(username):
-    global TARGET_USERNAME
-    TARGET_USERNAME = username
     url = f"https://api.twitter.com/2/users/by/username/{username}"
-    resp = requests.get(url, headers=HEADERS)
-    resp.raise_for_status()
-    return resp.json()["data"]["id"]
+    while True:
+        resp = requests.get(url, headers=HEADERS)
+        if resp.status_code == 429:
+            reset_time = int(resp.headers.get("x-rate-limit-reset", 0))
+            sleep_seconds = max(reset_time - int(time.time()), 0) + 1
+            print(f"Rate limit exceeded on get_user_id. Sleeping for {sleep_seconds} seconds...")
+            time.sleep(sleep_seconds)
+            continue
+        resp.raise_for_status()
+        return resp.json()["data"]["id"]
 
 def get_tweets_since(user_id, start_time, conn):
     url = f"https://api.twitter.com/2/users/{user_id}/tweets"
     params = {
         "max_results": 100,
         "start_time": start_time,
-        "exclude": "retweets",  # リツイートを除外
+        "exclude": "retweets",
         "tweet.fields": "created_at,text"
     }
-
     tweets = []
     next_token = None
 
@@ -63,6 +67,12 @@ def get_tweets_since(user_id, start_time, conn):
         if next_token:
             params["pagination_token"] = next_token
         resp = requests.get(url, headers=HEADERS, params=params)
+        if resp.status_code == 429:
+            reset_time = int(resp.headers.get("x-rate-limit-reset", 0))
+            sleep_seconds = max(reset_time - int(time.time()), 0) + 1
+            print(f"Rate limit exceeded on get_tweets_since. Sleeping for {sleep_seconds} seconds...")
+            time.sleep(sleep_seconds)
+            continue
         resp.raise_for_status()
         data = resp.json()
         for tweet in data.get("data", []):
@@ -92,6 +102,12 @@ def get_replies_to_user(username, start_time, conn):
         if next_token:
             params["next_token"] = next_token
         resp = requests.get(url, headers=HEADERS, params=params)
+        if resp.status_code == 429:
+            reset_time = int(resp.headers.get("x-rate-limit-reset", 0))
+            sleep_seconds = max(reset_time - int(time.time()), 0) + 1
+            print(f"Rate limit exceeded on get_replies_to_user. Sleeping for {sleep_seconds} seconds...")
+            time.sleep(sleep_seconds)
+            continue
         resp.raise_for_status()
         data = resp.json()
         for tweet in data.get("data", []):
