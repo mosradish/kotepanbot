@@ -1,25 +1,24 @@
 import os
-import time
-import requests
-import urllib3
-import snscrape.modules.twitter as sntwitter
-from dotenv import load_dotenv
 import pymysql
-import json
+import requests
+import time
+from dotenv import load_dotenv
 
-# SSL 警告を非表示にする
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+from discord import send_discord_embed  # discord.pyの関数を想定
 
 load_dotenv()
-
-DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL")
-TARGET_USERNAME = "kotehanx01"
-START_TIME = "2025-08-01"
 
 DB_HOST = os.getenv("DB_HOST")
 DB_USER = os.getenv("DB_USER")
 DB_PASSWORD = os.getenv("DB_PASSWORD")
 DB_NAME = os.getenv("DB_NAME")
+
+BEARER_TOKEN = os.getenv("TWITTER_BEARER_TOKEN")
+TARGET_USERNAME = "kotehanx01"
+TARGET_USER_ID = "3282272796"  # kotehanx01さんのユーザーIDを固定でセットしてください
+START_TIME = "2025-08-01T00:00:00Z"
+
+HEADERS = {"Authorization": f"Bearer {BEARER_TOKEN}"}
 
 def get_db_connection():
     return pymysql.connect(
@@ -41,51 +40,87 @@ def mark_fetched(conn, tweet_id):
         cur.execute("INSERT IGNORE INTO fetched_tweets (tweet_id) VALUES (%s)", (tweet_id,))
     conn.commit()
 
-def send_discord_embed(tweet):
-    tweet_text = tweet.get("content", "")
-    if len(tweet_text) > 400:
-        tweet_text = tweet_text[:397] + "..."
+def get_user_id(username):
+    # 固定IDを返すだけにしてあります
+    return TARGET_USER_ID
 
-    embed = {
-        "embeds": [
-            {
-                "title": f"📢 @{TARGET_USERNAME} さんの新しいツイート",
-                "url": f"https://twitter.com/{TARGET_USERNAME}/status/{tweet['id']}",
-                "description": tweet_text,
-                "color": 0x1DA1F2,
-                "footer": {"text": "Twitter → Discord 自動通知"},
-                "timestamp": tweet.get("date").isoformat()
-            }
-        ]
+def get_tweets_since(user_id, start_time, conn):
+    url = f"https://api.twitter.com/2/users/{user_id}/tweets"
+    params = {
+        "max_results": 100,
+        "start_time": start_time,
+        "exclude": "retweets",
+        "tweet.fields": "created_at,text"
     }
-
-    headers = {"Content-Type": "application/json"}
-    # verify=False を使う
-    resp = requests.post(DISCORD_WEBHOOK_URL, data=json.dumps(embed), headers=headers, verify=False)
-    resp.raise_for_status()
-
-def get_tweets_since(username, start_time, conn):
-    query = f"from:{username} since:{start_time}"
     tweets = []
+    next_token = None
 
-    for tweet in sntwitter.TwitterSearchScraper(query).get_items():
-        if not already_fetched(conn, str(tweet.id)):
-            tweets.append({
-                "id": str(tweet.id),
-                "content": tweet.content,
-                "date": tweet.date
-            })
-            mark_fetched(conn, str(tweet.id))
-            send_discord_embed({
-                "id": str(tweet.id),
-                "content": tweet.content,
-                "date": tweet.date
-            })
-
+    while True:
+        if next_token:
+            params["pagination_token"] = next_token
+        resp = requests.get(url, headers=HEADERS, params=params)
+        if resp.status_code == 429:
+            reset_time = int(resp.headers.get("x-rate-limit-reset", 0))
+            sleep_seconds = max(reset_time - int(time.time()), 0) + 1
+            print(f"Rate limit exceeded. Sleeping for {sleep_seconds} seconds...")
+            time.sleep(sleep_seconds)
+            continue
+        resp.raise_for_status()
+        data = resp.json()
+        for tweet in data.get("data", []):
+            if not already_fetched(conn, tweet["id"]):
+                tweet["author_username"] = TARGET_USERNAME
+                tweets.append(tweet)
+                mark_fetched(conn, tweet["id"])
+                send_discord_embed(tweet, TARGET_USERNAME)
+        next_token = data.get("meta", {}).get("next_token")
+        if not next_token:
+            break
     return tweets
+
+def get_replies_to_user(username, start_time, conn):
+    url = "https://api.twitter.com/2/tweets/search/recent"
+    query = f"to:{username}"
+    params = {
+        "query": query,
+        "max_results": 100,
+        "start_time": start_time,
+        "tweet.fields": "in_reply_to_user_id,author_id,created_at,text"
+    }
+    replies = []
+    next_token = None
+
+    while True:
+        if next_token:
+            params["next_token"] = next_token
+        resp = requests.get(url, headers=HEADERS, params=params)
+        if resp.status_code == 429:
+            reset_time = int(resp.headers.get("x-rate-limit-reset", 0))
+            sleep_seconds = max(reset_time - int(time.time()), 0) + 1
+            print(f"Rate limit exceeded. Sleeping for {sleep_seconds} seconds...")
+            time.sleep(sleep_seconds)
+            continue
+        resp.raise_for_status()
+        data = resp.json()
+        for tweet in data.get("data", []):
+            if not already_fetched(conn, tweet["id"]):
+                tweet["author_username"] = "reply_user"
+                replies.append(tweet)
+                mark_fetched(conn, tweet["id"])
+                send_discord_embed(tweet, username)
+        next_token = data.get("meta", {}).get("next_token")
+        if not next_token:
+            break
+    return replies
 
 if __name__ == "__main__":
     conn = get_db_connection()
-    tweets = get_tweets_since(TARGET_USERNAME, START_TIME, conn)
+    user_id = get_user_id(TARGET_USERNAME)
+
+    tweets = get_tweets_since(user_id, START_TIME, conn)
     print(f"新規ツイート {len(tweets)} 件")
+
+    replies = get_replies_to_user(TARGET_USERNAME, START_TIME, conn)
+    print(f"新規返信 {len(replies)} 件")
+
     conn.close()
