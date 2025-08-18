@@ -1,24 +1,26 @@
 import os
-import pymysql
+import time
+import requests
+import urllib3
 import snscrape.modules.twitter as sntwitter
-from datetime import datetime, timedelta, timezone
 from dotenv import load_dotenv
+import pymysql
+import json
 
-from discord import send_discord_embed  # 既存の関数を利用
+# SSL 警告を非表示にする
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 load_dotenv()
+
+DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL")
+TARGET_USERNAME = "kotehanx01"
+START_TIME = "2025-08-01"
 
 DB_HOST = os.getenv("DB_HOST")
 DB_USER = os.getenv("DB_USER")
 DB_PASSWORD = os.getenv("DB_PASSWORD")
 DB_NAME = os.getenv("DB_NAME")
 
-TARGET_USERNAME = "kotehanx01"
-
-# cron用：直近1時間分だけ取得
-START_TIME = datetime.now(timezone.utc) - timedelta(hours=1)
-
-# === DB接続関連 ===
 def get_db_connection():
     return pymysql.connect(
         host=DB_HOST,
@@ -39,59 +41,51 @@ def mark_fetched(conn, tweet_id):
         cur.execute("INSERT IGNORE INTO fetched_tweets (tweet_id) VALUES (%s)", (tweet_id,))
     conn.commit()
 
-# === ツイート取得 ===
-def get_tweets_since(username, start_time, conn):
-    tweets = []
-    query = f"from:{username} since:{start_time.strftime('%Y-%m-%d')}"
-    for i, tweet in enumerate(sntwitter.TwitterSearchScraper(query).get_items()):
-        if i > 200:  # 無限取得防止
-            break
-        if not already_fetched(conn, str(tweet.id)):
-            tweet_data = {
-                "id": str(tweet.id),
-                "text": tweet.content,
-                "created_at": tweet.date.isoformat(),
-                "author_username": username
-            }
-            # 画像がある場合
-            if tweet.media:
-                for m in tweet.media:
-                    if isinstance(m, sntwitter.Photo):
-                        tweet_data["media_url"] = m.fullUrl
-                        break
+def send_discord_embed(tweet):
+    tweet_text = tweet.get("content", "")
+    if len(tweet_text) > 400:
+        tweet_text = tweet_text[:397] + "..."
 
-            tweets.append(tweet_data)
+    embed = {
+        "embeds": [
+            {
+                "title": f"📢 @{TARGET_USERNAME} さんの新しいツイート",
+                "url": f"https://twitter.com/{TARGET_USERNAME}/status/{tweet['id']}",
+                "description": tweet_text,
+                "color": 0x1DA1F2,
+                "footer": {"text": "Twitter → Discord 自動通知"},
+                "timestamp": tweet.get("date").isoformat()
+            }
+        ]
+    }
+
+    headers = {"Content-Type": "application/json"}
+    # verify=False を使う
+    resp = requests.post(DISCORD_WEBHOOK_URL, data=json.dumps(embed), headers=headers, verify=False)
+    resp.raise_for_status()
+
+def get_tweets_since(username, start_time, conn):
+    query = f"from:{username} since:{start_time}"
+    tweets = []
+
+    for tweet in sntwitter.TwitterSearchScraper(query).get_items():
+        if not already_fetched(conn, str(tweet.id)):
+            tweets.append({
+                "id": str(tweet.id),
+                "content": tweet.content,
+                "date": tweet.date
+            })
             mark_fetched(conn, str(tweet.id))
-            send_discord_embed(tweet_data, username)
+            send_discord_embed({
+                "id": str(tweet.id),
+                "content": tweet.content,
+                "date": tweet.date
+            })
+
     return tweets
 
-# === リプライ取得 ===
-def get_replies_to_user(username, start_time, conn):
-    replies = []
-    query = f"to:{username} since:{start_time.strftime('%Y-%m-%d')}"
-    for i, tweet in enumerate(sntwitter.TwitterSearchScraper(query).get_items()):
-        if i > 200:
-            break
-        if not already_fetched(conn, str(tweet.id)):
-            tweet_data = {
-                "id": str(tweet.id),
-                "text": tweet.content,
-                "created_at": tweet.date.isoformat(),
-                "author_username": tweet.user.username
-            }
-            replies.append(tweet_data)
-            mark_fetched(conn, str(tweet.id))
-            send_discord_embed(tweet_data, username)
-    return replies
-
-# === メイン処理 ===
 if __name__ == "__main__":
     conn = get_db_connection()
-
     tweets = get_tweets_since(TARGET_USERNAME, START_TIME, conn)
     print(f"新規ツイート {len(tweets)} 件")
-
-    replies = get_replies_to_user(TARGET_USERNAME, START_TIME, conn)
-    print(f"新規返信 {len(replies)} 件")
-
     conn.close()
