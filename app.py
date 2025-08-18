@@ -7,6 +7,9 @@ from dotenv import load_dotenv
 from discord import send_discord_embed  # discord.pyの関数を想定
 
 load_dotenv()
+DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL")
+if DISCORD_WEBHOOK_URL is None:
+    raise ValueError("DISCORD_WEBHOOK_URL が .env に設定されていません")
 
 DB_HOST = os.getenv("DB_HOST")
 DB_USER = os.getenv("DB_USER")

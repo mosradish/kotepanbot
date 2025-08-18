@@ -1,11 +1,5 @@
-import os
-import json
-import requests
-
-DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL")
-
 def send_discord_embed(tweet, target_username):
-    author = tweet.get("author_username", target_username)
+    author = tweet.get('author_username', target_username)
     tweet_text = tweet.get("text", "")
     if len(tweet_text) > 400:
         tweet_text = tweet_text[:397] + "..."
@@ -37,8 +31,8 @@ def send_discord_embed(tweet, target_username):
         ]
     }
 
-    # 画像がある場合は追加
-    media_url = tweet.get("media_url")
+    # 画像URLがある場合 embedに追加
+    media_url = tweet.get("media_url")  # 例：tweetに直接 media_url を入れてください
     if media_url:
         embed["embeds"][0]["image"] = {"url": media_url}
 
