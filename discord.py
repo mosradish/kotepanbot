@@ -1,3 +1,6 @@
+import requests
+import json
+
 def send_discord_embed(tweet, target_username):
     author = tweet.get('author_username', target_username)
     tweet_text = tweet.get("text", "")
